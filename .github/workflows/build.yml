@@ -1,7 +1,11 @@
 name: build-ipa
 on:
-  push: { branches: [main] }
+  push:
+    branches: [main]
   workflow_dispatch:
+
+permissions:
+  contents: write   # 失败时把诊断日志推到 ci-logs 分支（公开分支匿名可读）
 
 jobs:
   build:
@@ -12,21 +16,29 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Generate project (含格式降级兜底)
+      # project.yml 已指定 projectFormat: xcode15_0（XcodeGen 源头输出 Xcode 15 兼容格式）
+      # sed 兜底保留：万一 runner 上的 XcodeGen 过老不认识 projectFormat 仍写出新格式时降级
+      - name: Generate project (含格式兜底)
         run: |
           xcodegen generate
-          # XcodeGen 可能写出 objectVersion 77（Xcode 26 格式），老 Xcode 读不了——降到 60 通用格式
           sed -i '' 's/objectVersion = [0-9]*/objectVersion = 60/' 清屏.xcodeproj/project.pbxproj
+          echo "=== pbxproj objectVersion 现值："
+          grep objectVersion 清屏.xcodeproj/project.pbxproj
+
+      # 独立验证步骤：把"项目加载失败"和"构建失败"分开——-list 能过说明工程文件没问题
+      - name: Verify project loads
+        run: xcodebuild -list -project 清屏.xcodeproj 2>&1 | tee list.log
 
       # 无签名编译：产物用 Sideloadly + 自己的 Apple ID 重签再装
       - name: Build unsigned app
         run: |
+          set -o pipefail
           xcodebuild -project 清屏.xcodeproj \
             -scheme 清屏 -configuration Release \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
-            clean build
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            clean build 2>&1 | tee xcodebuild.log
 
       - name: Package ipa
         run: |
@@ -34,7 +46,44 @@ jobs:
           cp -r "build/Build/Products/Release-iphoneos/清屏.app" build/Payload/
           cd build && zip -r 清屏-unsigned.ipa Payload
 
+      # 失败时完整日志作为 artifact 兜底（tee 已同步写进 job log，网页可直接看）
+      - name: Upload failure log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-failure-log
+          path: |
+            xcodebuild.log
+            list.log
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@v4
         with:
           name: 清屏-unsigned-ipa
           path: build/清屏-unsigned.ipa
+
+      # 失败时把错误行摘要写进 job summary（Actions 网页 Summary 页直接看，不用翻日志）
+      - name: Write error summary
+        if: failure()
+        run: |
+          {
+            echo "## 构建错误摘要"
+            echo '```'
+            grep -hE "error:|fatal|unsupported|Signing for|xcodebuild: error" xcodebuild.log list.log 2>/dev/null | head -60 || echo "(没抓到 error 行，看完整日志)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 失败时把完整日志推到 ci-logs 分支：公开仓库分支匿名可读，外部诊断不用登录
+      # 注：GITHUB_TOKEN 的 push 不会触发新的 workflow run，无递归风险
+      - name: Push diagnostics to ci-logs branch
+        if: failure()
+        run: |
+          git config user.name "ci-bot"
+          git config user.email "ci-bot@users.noreply.github.com"
+          mkdir -p logs
+          cp xcodebuild.log logs/ 2>/dev/null || true
+          cp list.log logs/ 2>/dev/null || true
+          echo "run ${GITHUB_RUN_ID} / $(date -u)" > logs/latest.txt
+          git add logs
+          git commit -m "CI failure log run ${GITHUB_RUN_ID}" || exit 0
+          git push origin HEAD:ci-logs --force

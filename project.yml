@@ -1,13 +1,14 @@
 name: 清屏
 options:
   bundleIdPrefix: com.adam
+  projectFormat: xcode15_0
   deploymentTarget:
     iOS: "15.0"
   createIntermediateGroups: true
 
 settings:
   base:
-    SWIFT_VERSION: "5.9"
+    SWIFT_VERSION: "5.0"
     TARGETED_DEVICE_FAMILY: "1"
     CODE_SIGN_STYLE: Automatic
 
