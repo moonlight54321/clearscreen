@@ -53,7 +53,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    override func stopTunnel(reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
+    override func stopTunnel(with reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         stats.flush()
         connection?.cancel()
         completionHandler()
