@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-/// 主 App 侧的统计读取器：轮询 + Darwin 通知双触发刷新
+/// 主 App 侧的统计读取器：1 秒轮询刷新
 final class StatsStore: ObservableObject {
     @Published var totalBlocked = 0
     @Published var totalQuery = 0
@@ -14,7 +14,6 @@ final class StatsStore: ObservableObject {
     }
 
     private var timer: Timer?
-    private var removeObservation: (() -> Void)?
 
     init() {
         masterOn = Shared.defaults.object(forKey: Shared.keyMasterOn) as? Bool ?? false
@@ -23,15 +22,10 @@ final class StatsStore: ObservableObject {
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             self?.reload()
         }
-        // 扩展落盘瞬间主动叫醒一次
-        removeObservation = DarwinNotificationCenter.observe(Shared.darwinRefresh) { [weak self] in
-            DispatchQueue.main.async { self?.reload() }
-        }
     }
 
     deinit {
         timer?.invalidate()
-        removeObservation?()
     }
 
     func reload() {

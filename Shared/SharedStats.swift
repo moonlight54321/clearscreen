@@ -1,6 +1,9 @@
 import Foundation
 
-/// 统计写入器（App 与扩展共用）——节流落盘 + Darwin 通知提醒主 App 刷新 UI
+/// 统计写入器（App 与扩展共用）——2 秒节流落盘
+/// 刷新机制说明：主 App 的 StatsStore 用 1 秒轮询读盘（原 Darwin 通知方案已移除：
+/// CFNotificationCenter 的 Darwin 中心 API 在 iOS SDK 的 Swift 接口层不可见，需 bridging header
+/// 才能用——轮询已足够顺滑，砍掉复杂度换编译确定性）
 final class StatsWriter {
     private let d = Shared.defaults
     private var pendingBlocked = 0
@@ -53,8 +56,6 @@ final class StatsWriter {
         pendingBlocked = 0
         pendingQuery = 0
         pendingDomains = [:]
-
-        DarwinNotificationCenter.post(Shared.darwinRefresh)
     }
 
     static let dayFormatter: DateFormatter = {
@@ -62,40 +63,4 @@ final class StatsWriter {
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
-}
-
-/// Darwin 通知——扩展和主 App 进程间的实时信道（不占额外权限）
-enum DarwinNotificationCenter {
-    /// 观察盒注册表：保住 CF 观察指针的生命周期
-    private static var boxes: [ObjectIdentifier: ObserverBox] = [:]
-    private static let bridgeName = Notification.Name("com.adam.clearscreen.darwin.bridge")
-
-    static func post(_ name: String) {
-        let center = CFNotificationCenterGetDarwinNotificationCenter()
-        CFNotificationCenterPostNotification(center, CFNotificationName(name as CFString), nil, nil, true)
-    }
-
-    static func observe(_ name: String, callback: @escaping () -> Void) -> () -> Void {
-        let box = ObserverBox(callback: callback)
-        boxes[ObjectIdentifier(box)] = box
-        let center = CFNotificationCenterGetDarwinNotificationCenter()
-        let nameRef = CFNotificationName(name as CFString)
-        // CF 回调是 C 函数指针（不能捕获），借 NotificationCenter 桥一次到主线程
-        CFNotificationCenterAddObserver(center, Unmanaged.passUnretained(box).toOpaque(), { _, _, _, _, _ in
-            NotificationCenter.default.post(name: bridgeName, object: nil)
-        }, nameRef, nil, .deliverImmediately)
-        let token = NotificationCenter.default.addObserver(forName: bridgeName, object: nil, queue: .main) { _ in
-            callback()
-        }
-        return {
-            NotificationCenter.default.removeObserver(token)
-            CFNotificationCenterRemoveObserver(center, Unmanaged.passUnretained(box).toOpaque(), nameRef, nil)
-            boxes.removeValue(forKey: ObjectIdentifier(box))
-        }
-    }
-}
-
-private final class ObserverBox {
-    let callback: () -> Void
-    init(callback: @escaping () -> Void) { self.callback = callback }
 }

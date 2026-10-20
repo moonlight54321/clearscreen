@@ -13,18 +13,18 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
     private let blocklist = BlocklistStore()
     private let stats = StatsWriter()
-    private var upstream: NWEndpoint.Host = "223.5.5.5"
+    private var upstream: Network.NWEndpoint.Host = "223.5.5.5"
     private var connection: NWConnection?
     // 待应答查询表：key = 改写后的事务 ID
     private var pendingQueries: [UInt16: (clientIP: [UInt8], clientPort: UInt16, origID: UInt16, createdAt: Date)] = [:]
     private var pendingCount = 0
     private var idCursor: UInt16 = 0
 
-    override func start(completionHandler: @escaping (Error?) -> Void) {
+    override func startTunnel(options: [String : NSObject]?, completionHandler: @escaping (Error?) -> Void) {
         blocklist.reload()
         let d = Shared.defaults
         let upstreamStr = d.string(forKey: Shared.keyUpstreamDNS) ?? Shared.defaultUpstream
-        upstream = NWEndpoint.Host(upstreamStr)
+        upstream = Network.NWEndpoint.Host(upstreamStr)
 
         // 隧道网络设置：虚拟 IP + 只把 DNS 地址路由进隧道（轻量模式，正常流量不经过隧道）
         let settings = NEPacketTunnelNetworkSettings(tunnelRemoteAddress: Shared.tunnelIP)
@@ -53,7 +53,7 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
         }
     }
 
-    override func stop(completionHandler: @escaping () -> Void) {
+    override func stopTunnel(reason: NEProviderStopReason, completionHandler: @escaping () -> Void) {
         stats.flush()
         connection?.cancel()
         completionHandler()
