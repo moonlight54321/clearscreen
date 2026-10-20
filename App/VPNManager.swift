@@ -47,12 +47,11 @@ final class VPNManager: ObservableObject {
     /// 开隧道（iOS 会弹"添加 VPN 配置"确认框——那就是你的海关申报环节）
     func start() {
         manager.saveToPreferences { [weak self] _ in
-            self?.manager.loadFromPreferences { m, _ in
-                guard let m = m else { return }
-                self?.manager = m
-                self?.manager.isEnabled = true
-                self?.manager.saveToPreferences { _, _ in
-                    try? self?.manager.connection.startVPNTunnel()
+            guard let self = self else { return }
+            self.manager.loadFromPreferences { _ in
+                self.manager.isEnabled = true
+                self.manager.saveToPreferences { _ in
+                    try? self.manager.connection.startVPNTunnel()
                 }
             }
         }
